@@ -17,6 +17,7 @@ add_subdirectory(libs/glad)
 add_subdirectory(libs/glm)
 add_subdirectory(libs/stb)
 add_subdirectory(libs/tl)
+add_subdirectory(libs/tg)
 
 set(SOURCES
     main.cpp
@@ -31,4 +32,5 @@ target_link_libraries(raygl
     glm
     stb
     tl
+    tg
 )
