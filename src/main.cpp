@@ -5,6 +5,7 @@
 #include <tl/fmt.hpp>
 #include <tl/basic.hpp>
 #include <tg/shader_utils.hpp>
+#include <glm/glm.hpp>
 
 char g_scratch[10*1024];
 GLFWwindow* window;
@@ -49,7 +50,8 @@ char* loadStr(const char* fileName)
 struct {
     u32 prog;
     struct {
-        i32 fov;
+        i32 fovFactor;
+        i32 viewMtx;
     } unifLocs;
 } shader;
 
@@ -105,7 +107,8 @@ static void compileShaders()
 
     glUseProgram(shader.prog);
 
-    shader.unifLocs.fov = glGetUniformLocation(shader.prog, "u_fov");
+    shader.unifLocs.fovFactor = glGetUniformLocation(shader.prog, "u_fovFactor");
+    shader.unifLocs.viewMtx = glGetUniformLocation(shader.prog, "u_viewMtx");
 }
 
 static void glErrorCallback(const char *name, void *funcptr, int len_args, ...) {
@@ -174,8 +177,17 @@ int main()
         glClearColor(1,0,0,1);
         glClear(GL_COLOR_BUFFER_BIT);
 
+        const float aspectRatio = float(w) / h;
+        const float fovY = 1.2;
+        const float fovFactorY = tan(fovY);
+        const float fovFactorX = aspectRatio * fovFactorY;
         glUseProgram(shader.prog);
-        glUniform2f(shader.unifLocs.fov, 1, 1);
+        glUniform2f(shader.unifLocs.fovFactor, fovFactorX, fovFactorY);
+        glm::mat4 I = glm::mat4(1, 0, 0, 0,
+                                0, 1, 0, 0,
+                                0, 0, 1, 0,
+                                0, 0, 5, 0);
+        glUniformMatrix4fv(shader.unifLocs.viewMtx, 1, GL_FALSE, &I[0][0]);
 
         glBindVertexArray(quadVao);
         glDrawArrays(GL_TRIANGLES, 0, 6);
