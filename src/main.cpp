@@ -53,9 +53,62 @@ struct {
         i32 fovFactor;
         i32 viewMtx;
     } unifLocs;
-} shader;
+} camRaysShad;
+
+struct {
+    u32 prog;
+    struct {
+        i32 spherePos;
+        i32 sphereRad;
+        i32 emitColor;
+        i32 albedo;
+    } unifLocs;
+} sphereShad;
 
 u32 quadVbo, quadVao;
+
+constexpr int numBounces = 4;
+struct Textures {
+    u32 ori[2];
+    u32 dir[2];
+    u32 atten[numBounces];
+    u32 emit[numBounces];
+    u32 depth;
+    void init();
+    void resize(int w, int h);
+} textures;
+
+void Textures::init()
+{
+    const int numColorTextures = sizeof(Textures) / 4 - 1; // depth is not color
+    u32* allTextures = (u32*)this;
+
+    glGenTextures(numColorTextures, allTextures);
+    for(int i = 0; i < numColorTextures; i++) {
+        glBindTexture(GL_TEXTURE_2D, allTextures[i]);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_MIRRORED_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_MIRRORED_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    }
+
+    glGenRenderbuffers(1, &depth);
+}
+
+void Textures::resize(int w, int h)
+{
+    const int numColorTextures = sizeof(Textures) / 4 - 1; // depth is not color
+    u32* allTextures = (u32*)this;
+
+    glGenTextures(numColorTextures, allTextures);
+    for(int i = 0; i < numColorTextures; i++) {
+        glBindTexture(GL_TEXTURE_2D, allTextures[i]);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB32F, w, h, 0, GL_RGB, GL_FLOAT, nullptr);
+    }
+
+    glBindRenderbuffer(GL_RENDERBUFFER, depth);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT, w, h);
+}
 
 template <i32 N>
 static void uploadSrcs(u32 shad, const char* (&srcs)[N])
@@ -68,47 +121,88 @@ static void uploadSrcs(u32 shad, const char* (&srcs)[N])
     glShaderSource(shad, N, srcs, lens);
 }
 
+static const char* s_glslVersion = "#version 460\n";
+static const char* s_glslUtilSrc = nullptr;
+
+u32 makeShader(GLenum type, const char* fileName)
+{
+    const u32 shad = glCreateShader(type);
+    const char* src = loadStr(fileName);
+    defer(delete[] src);
+    const char* srcs[] = { s_glslVersion, s_glslUtilSrc, src };
+    uploadSrcs(shad, srcs);
+    glCompileShader(shad);
+    if(const char* errMsg = tg::checkCompileErrors(shad, g_scratch)) {
+        tl::eprintln("Error compiling: ", fileName);
+        tl::eprintln(errMsg);
+        assert(false);
+    }
+    return shad;
+}
+
+u32 makeShaderProg(const char* vertFileName, const char* fragFileName)
+{
+    const u32 vertShad = makeShader(GL_VERTEX_SHADER, vertFileName);
+    defer(glDeleteShader(vertShad));
+
+    const u32 fragShad = makeShader(GL_FRAGMENT_SHADER, fragFileName);
+    defer(glDeleteShader(fragShad));
+
+    const u32 prog = glCreateProgram();
+    glAttachShader(prog, vertShad);
+    glAttachShader(prog, fragShad);
+    glLinkProgram(prog);
+    if(const char* errMsg = tg::checkLinkErrors(prog, g_scratch)) {
+        tl::eprintln("Error linking: ", vertFileName, " + ", fragFileName);
+        tl::eprintln(errMsg);
+        assert(false);
+    }
+    return prog;
+}
+
+u32 makeShaderProg(u32 vertShad, const char* fragFileName)
+{
+    const u32 fragShad = makeShader(GL_FRAGMENT_SHADER, fragFileName);
+    defer(glDeleteShader(fragShad));
+
+    const u32 prog = glCreateProgram();
+    glAttachShader(prog, vertShad);
+    glAttachShader(prog, fragShad);
+    glLinkProgram(prog);
+    if(const char* errMsg = tg::checkLinkErrors(prog, g_scratch)) {
+        tl::eprintln("Error linking: ", fragFileName);
+        tl::eprintln(errMsg);
+        assert(false);
+    }
+    return prog;
+}
+
 static void compileShaders()
 {
-    static const char* glslVersion = "#version 460\n";
+    s_glslUtilSrc = loadStr("src/shaders/util.glsl");
+    defer(delete[] s_glslUtilSrc);
 
-    const u32 vertShad = glCreateShader(GL_VERTEX_SHADER);
-    defer(glDeleteShader(vertShad));
-    const char* vertShadSrc = loadStr("src/shaders/vert.glsl");
-    defer(delete[] vertShadSrc);
-    const char* vertSrcs[] = { glslVersion, vertShadSrc };
-    uploadSrcs(vertShad, vertSrcs);
-    glCompileShader(vertShad);
-    if(const char* errMsg = tg::checkCompileErrors(vertShad, g_scratch)) {
-        tl::eprintln(errMsg);
-        assert(false);
-    }
+    // --- cam_rays ---
+    camRaysShad.prog = makeShaderProg(
+        "src/shaders/cam_rays_vert.glsl",
+        "src/shaders/cam_rays_frag.glsl");
+    camRaysShad.unifLocs.fovFactor =
+        glGetUniformLocation(camRaysShad.prog, "u_fovFactor");
+    camRaysShad.unifLocs.viewMtx =
+        glGetUniformLocation(camRaysShad.prog, "u_viewMtx");
 
-    const u32 fragShad = glCreateShader(GL_FRAGMENT_SHADER);
-    defer(glDeleteShader(fragShad));
-    const char* fragShadSrc = loadStr("src/shaders/frag.glsl");
-    defer(delete[] fragShadSrc);
-    const char* fragSrcs[] = { glslVersion, fragShadSrc };
-    uploadSrcs(fragShad, fragSrcs);
-    glCompileShader(fragShad);
-    if(const char* errMsg = tg::checkCompileErrors(fragShad, g_scratch)) {
-        tl::eprintln(errMsg);
-        assert(false);
-    }
+    const u32 vertShad = makeShader(GL_VERTEX_SHADER, "src/shaders/screen_tc.glsl");
 
-    shader.prog = glCreateProgram();
-    glAttachShader(shader.prog, vertShad);
-    glAttachShader(shader.prog, fragShad);
-    glLinkProgram(shader.prog);
-    if(const char* errMsg = tg::checkLinkErrors(shader.prog, g_scratch)) {
-        tl::eprintln(errMsg);
-        assert(false);
-    }
-
-    glUseProgram(shader.prog);
-
-    shader.unifLocs.fovFactor = glGetUniformLocation(shader.prog, "u_fovFactor");
-    shader.unifLocs.viewMtx = glGetUniformLocation(shader.prog, "u_viewMtx");
+    // --- sphere ---
+    sphereShad.prog = makeShaderProg(vertShad, "src/shaders/sphere.glsl");
+    sphereShad.unifLocs.spherePos =
+        glGetUniformLocation(sphereShad.prog, "u_spherePos");
+    sphereShad.unifLocs.sphereRad =
+        glGetUniformLocation(sphereShad.prog, "u_sphereRad");
+    sphereShad.unifLocs.emitColor =
+        glGetUniformLocation(sphereShad.prog, "u_emitColor");
+    sphereShad.unifLocs.albedo =
+        glGetUniformLocation(sphereShad.prog, "u_albedo");
 }
 
 static void glErrorCallback(const char *name, void *funcptr, int len_args, ...) {
@@ -164,33 +258,55 @@ int main()
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
 
+    int w, h;
+    glfwGetFramebufferSize(window, &w, &h);
+    float aspectRatio = float(w) / h;
+    const float fovY = 1.2;
+    const float fovFactorY = tan(fovY);
+    const float fovFactorX = aspectRatio * fovFactorY;
+
+    textures.init();
+    textures.resize(w, h);
+
+    u32 fbo;
+    glGenFramebuffers(1, &fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+
+    // initialization pass - draw camera rays
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+        GL_TEXTURE_2D, textures.ori[0], 0);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1,
+        GL_TEXTURE_2D, textures.dir[0], 0);
+    glUseProgram(camRaysShad.prog);
+    glUniform2f(camRaysShad.unifLocs.fovFactor, fovFactorX, fovFactorY);
+    glm::mat4 viewMtx =
+        glm::mat4(1, 0, 0, 0,
+                  0, 1, 0, 0,
+                  0, 0, 1, 0,
+                  0, 0, 5, 0);
+    glUniformMatrix4fv(camRaysShad.unifLocs.viewMtx, 1, GL_FALSE, &viewMtx[0][0]);
+    glBindVertexArray(quadVao);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+
+    int srcTexNdx = 0;
+
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
 
         // draw scene
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        int w, h;
         glfwGetFramebufferSize(window, &w, &h);
+        aspectRatio = float(w) / h;
         glViewport(0, 0, w, h);
         glScissor(0, 0, w, h);
         glClearColor(1,0,0,1);
         glClear(GL_COLOR_BUFFER_BIT);
 
-        const float aspectRatio = float(w) / h;
-        const float fovY = 1.2;
-        const float fovFactorY = tan(fovY);
-        const float fovFactorX = aspectRatio * fovFactorY;
-        glUseProgram(shader.prog);
-        glUniform2f(shader.unifLocs.fovFactor, fovFactorX, fovFactorY);
-        glm::mat4 I = glm::mat4(1, 0, 0, 0,
-                                0, 1, 0, 0,
-                                0, 0, 1, 0,
-                                0, 0, 5, 0);
-        glUniformMatrix4fv(shader.unifLocs.viewMtx, 1, GL_FALSE, &I[0][0]);
 
-        glBindVertexArray(quadVao);
-        glDrawArrays(GL_TRIANGLES, 0, 6);
+        //glUseProgram(shader.prog);
+
+
 
         glfwSwapBuffers(window);
     }
