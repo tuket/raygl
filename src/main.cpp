@@ -65,6 +65,8 @@ struct {
     } unifLocs;
 } sphereShad;
 
+u32 splatTexProg;
+
 u32 quadVbo, quadVao;
 
 constexpr int numBounces = 4;
@@ -100,7 +102,6 @@ void Textures::resize(int w, int h)
     const int numColorTextures = sizeof(Textures) / 4 - 1; // depth is not color
     u32* allTextures = (u32*)this;
 
-    glGenTextures(numColorTextures, allTextures);
     for(int i = 0; i < numColorTextures; i++) {
         glBindTexture(GL_TEXTURE_2D, allTextures[i]);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB32F, w, h, 0, GL_RGB, GL_FLOAT, nullptr);
@@ -193,6 +194,9 @@ static void compileShaders()
 
     const u32 vertShad = makeShader(GL_VERTEX_SHADER, "src/shaders/screen_tc.glsl");
 
+    // --- splat texture ---
+    splatTexProg = makeShaderProg(vertShad, "src/shaders/splat_tex.glsl");
+
     // --- sphere ---
     sphereShad.prog = makeShaderProg(vertShad, "src/shaders/sphere.glsl");
     sphereShad.unifLocs.spherePos =
@@ -277,6 +281,9 @@ int main()
         GL_TEXTURE_2D, textures.ori[0], 0);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1,
         GL_TEXTURE_2D, textures.dir[0], 0);
+    assert(glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE);
+    const GLenum initPassDrawBuffers[] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
+    glDrawBuffers(2, initPassDrawBuffers);
     glUseProgram(camRaysShad.prog);
     glUniform2f(camRaysShad.unifLocs.fovFactor, fovFactorX, fovFactorY);
     glm::mat4 viewMtx =
@@ -303,10 +310,11 @@ int main()
         glClearColor(1,0,0,1);
         glClear(GL_COLOR_BUFFER_BIT);
 
-
-        //glUseProgram(shader.prog);
-
-
+        glUseProgram(splatTexProg);
+        glUniform1i(0, 0);
+        glBindTexture(GL_TEXTURE_2D, textures.dir[0]);
+        glBindVertexArray(quadVao);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
 
         glfwSwapBuffers(window);
     }
