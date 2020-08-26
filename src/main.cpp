@@ -7,6 +7,9 @@
 #include <tg/shader_utils.hpp>
 #include <glm/glm.hpp>
 
+using glm::vec3;
+using glm::vec4;
+
 char g_scratch[10*1024];
 GLFWwindow* window;
 
@@ -48,6 +51,28 @@ char* loadStr(const char* fileName)
     fclose(f);
     return str;
 }
+
+struct SphereObj {
+    vec3 pos;
+    float rad;
+    vec3 emitColor;
+    vec3 albedo;
+};
+
+SphereObj sceneSpheres[] = {
+    SphereObj {
+        {0, 0, 0},
+        2,
+        {0.5f, 0.5f, 0},
+        {0, 0.5f, 0}
+    },
+    SphereObj {
+        {0, -4, 0},
+        2,
+        {0, 0, 0},
+        {1.f, 1.f, 1.f}
+    }
+};
 
 struct CommonUnifLocs {
     i32 sampleInd;
@@ -382,12 +407,15 @@ static void draw(int w, int h)
         glUniform1ui(sphereShad.unifLocs.numSamples, k_numSamples);
         glUniform1i(sphereShad.unifLocs.rayOri, 0);
         glUniform1i(sphereShad.unifLocs.rayDir, 1);
-        glUniform3f(sphereShad.unifLocs.spherePos, 0, 0, 0);
-        glUniform1f(sphereShad.unifLocs.sphereRad, 2);
-        glUniform3f(sphereShad.unifLocs.emitColor, 0.5, 0.5, 0.0);
-        glUniform3f(sphereShad.unifLocs.albedo, 0, 0.5, 0);
+        for(int sphereInd = 0; sphereInd < tl::size(sceneSpheres); sphereInd++) {
+            const SphereObj& obj = sceneSpheres[sphereInd];
+            glUniform3fv(sphereShad.unifLocs.spherePos, 1, &obj.pos[0]);
+            glUniform1f(sphereShad.unifLocs.sphereRad, obj.rad);
+            glUniform3fv(sphereShad.unifLocs.emitColor, 1, &obj.emitColor[0]);
+            glUniform3fv(sphereShad.unifLocs.albedo, 1, &obj.albedo[0]);
 
-        glDrawArrays(GL_TRIANGLES, 0, 6);
+            glDrawArrays(GL_TRIANGLES, 0, 6);
+        }
 
         rayTexTarget ^= 1;
     }
