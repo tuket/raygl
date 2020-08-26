@@ -13,7 +13,7 @@ void main()
 {
     // randomize the sample inside the pixel
     vec2 jitter = hammersleyVec2(u_sampleInd, u_numSamples);
-    jitter = 10 * (jitter - 0.5) / vec2(u_resolution);
+    jitter = 0 * (jitter - 0.5) / vec2(u_resolution);
 
     vec3 dir;
     dir.xy = (a_pos + jitter) * u_fovFactor;

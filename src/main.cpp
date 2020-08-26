@@ -67,11 +67,23 @@ SphereObj sceneSpheres[] = {
         {0, 0.5f, 0}
     },
     SphereObj {
-        {0, -4, 0},
+        {-4, 0, 0},
         2,
+        {1, 1, 1},
+        {1.f, 1.f, 1.f}
+    },
+    SphereObj {
+        {+4, 0, 0},
+        2,
+        {1, 1, 1},
+        {1.f, 1.f, 1.f}
+    },
+    SphereObj {
+        {0, -1002, 0},
+        1000,
         {0, 0, 0},
         {1.f, 1.f, 1.f}
-    }
+    },
 };
 
 struct CommonUnifLocs {
@@ -349,94 +361,97 @@ static void draw(int w, int h)
     textures.resize(w, h);
     float aspectRatio = float(w) / h;
     const float fovY = 1.2;
-    const float fovFactorY = tan(fovY);
+    const float fovFactorY = tan(0.5f * fovY);
     const float fovFactorX = aspectRatio * fovFactorY;
 
     glBindFramebuffer(GL_FRAMEBUFFER, fbo);
 
-    // --- initialization pass - draw camera rays ---
-    glDisable(GL_DEPTH_TEST);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-        GL_TEXTURE_2D, textures.ori[0], 0);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1,
-        GL_TEXTURE_2D, textures.dir[0], 0);
-    assert(glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE);
-    const GLenum initPassDrawBuffers[] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
-    glDrawBuffers(2, initPassDrawBuffers);
-    glUseProgram(camRaysShad.prog);
-    glUniform2f(camRaysShad.unifLocs.fovFactor, fovFactorX, fovFactorY);
-    glm::mat4 viewMtx =
-        glm::mat4(1, 0, 0, 0,
-                  0, 1, 0, 0,
-                  0, 0, 1, 0,
-                  0, 0, 5, 0);
-    glUniformMatrix4fv(camRaysShad.unifLocs.viewMtx, 1, GL_FALSE, &viewMtx[0][0]);
-    glUniform1ui(camRaysShad.unifLocs.sampleInd, 0);
-    glUniform1ui(camRaysShad.unifLocs.numSamples, k_numSamples);
-    glUniform2ui(camRaysShad.unifLocs.resolution, w, h);
-    glBindVertexArray(quadVao);
-    glDrawArrays(GL_TRIANGLES, 0, 6);
-
-    // --- bounce passes ---
-    //glEnable(GL_DEPTH_TEST);
-    const GLenum bouncePassDrawBuffers[] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2, GL_COLOR_ATTACHMENT3};
-    glDrawBuffers(4, bouncePassDrawBuffers);
-    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
-                GL_RENDERBUFFER, textures.depth);
-    int rayTexTarget = 1;
-    for(int bounce = 0; bounce < numBounces; bounce++)
+    for(int sampleInd = 0; sampleInd < k_numSamples; sampleInd++)
     {
+        // --- initialization pass - draw camera rays ---
+        glDisable(GL_DEPTH_TEST);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-            GL_TEXTURE_2D, textures.ori[rayTexTarget], 0);
+            GL_TEXTURE_2D, textures.ori[0], 0);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1,
-            GL_TEXTURE_2D, textures.dir[rayTexTarget], 0);
-        glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2,
-            textures.atten, 0, bounce);
-        glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT3,
-            textures.emit, 0, bounce);
-        
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+            GL_TEXTURE_2D, textures.dir[0], 0);
+        assert(glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE);
+        const GLenum initPassDrawBuffers[] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
+        glDrawBuffers(2, initPassDrawBuffers);
+        glUseProgram(camRaysShad.prog);
+        glUniform2f(camRaysShad.unifLocs.fovFactor, fovFactorX, fovFactorY);
+        glm::mat4 viewMtx =
+            glm::mat4(1, 0, 0, 0,
+                      0, 1, 0, 0,
+                      0, 0, 1, 0,
+                      0, 0, 10, 0);
+        glUniformMatrix4fv(camRaysShad.unifLocs.viewMtx, 1, GL_FALSE, &viewMtx[0][0]);
+        glUniform1ui(camRaysShad.unifLocs.sampleInd, 0);
+        glUniform1ui(camRaysShad.unifLocs.numSamples, k_numSamples);
+        glUniform2ui(camRaysShad.unifLocs.resolution, w, h);
+        glBindVertexArray(quadVao);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
 
-        glUseProgram(sphereShad.prog);
-        const int rayTexSrc = rayTexTarget ^ 1;
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, textures.ori[rayTexSrc]);
-        glActiveTexture(GL_TEXTURE1);
-        glBindTexture(GL_TEXTURE_2D, textures.dir[rayTexSrc]);
-        glUniform1ui(sphereShad.unifLocs.sampleInd, 0);
-        glUniform1ui(sphereShad.unifLocs.numSamples, k_numSamples);
-        glUniform1i(sphereShad.unifLocs.rayOri, 0);
-        glUniform1i(sphereShad.unifLocs.rayDir, 1);
-        for(int sphereInd = 0; sphereInd < tl::size(sceneSpheres); sphereInd++) {
-            const SphereObj& obj = sceneSpheres[sphereInd];
-            glUniform3fv(sphereShad.unifLocs.spherePos, 1, &obj.pos[0]);
-            glUniform1f(sphereShad.unifLocs.sphereRad, obj.rad);
-            glUniform3fv(sphereShad.unifLocs.emitColor, 1, &obj.emitColor[0]);
-            glUniform3fv(sphereShad.unifLocs.albedo, 1, &obj.albedo[0]);
+        // --- bounce passes ---
+        glEnable(GL_DEPTH_TEST);
+        const GLenum bouncePassDrawBuffers[] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2, GL_COLOR_ATTACHMENT3};
+        glDrawBuffers(4, bouncePassDrawBuffers);
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+                    GL_RENDERBUFFER, textures.depth);
+        int rayTexTarget = 1;
+        for(int bounce = 0; bounce < numBounces; bounce++)
+        {
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                GL_TEXTURE_2D, textures.ori[rayTexTarget], 0);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1,
+                GL_TEXTURE_2D, textures.dir[rayTexTarget], 0);
+            glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2,
+                textures.atten, 0, bounce);
+            glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT3,
+                textures.emit, 0, bounce);
+            
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-            glDrawArrays(GL_TRIANGLES, 0, 6);
+            glUseProgram(sphereShad.prog);
+            const int rayTexSrc = rayTexTarget ^ 1;
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, textures.ori[rayTexSrc]);
+            glActiveTexture(GL_TEXTURE1);
+            glBindTexture(GL_TEXTURE_2D, textures.dir[rayTexSrc]);
+            glUniform1ui(sphereShad.unifLocs.sampleInd, 0);
+            glUniform1ui(sphereShad.unifLocs.numSamples, k_numSamples);
+            glUniform1i(sphereShad.unifLocs.rayOri, 0);
+            glUniform1i(sphereShad.unifLocs.rayDir, 1);
+            for(int sphereInd = 0; sphereInd < tl::size(sceneSpheres); sphereInd++) {
+                const SphereObj& obj = sceneSpheres[sphereInd];
+                glUniform3fv(sphereShad.unifLocs.spherePos, 1, &obj.pos[0]);
+                glUniform1f(sphereShad.unifLocs.sphereRad, obj.rad);
+                glUniform3fv(sphereShad.unifLocs.emitColor, 1, &obj.emitColor[0]);
+                glUniform3fv(sphereShad.unifLocs.albedo, 1, &obj.albedo[0]);
+
+                glDrawArrays(GL_TRIANGLES, 0, 6);
+            }
+
+            rayTexTarget ^= 1;
         }
 
-        rayTexTarget ^= 1;
+        // --- accum bounces pass ---
+        glDisable(GL_DEPTH_TEST);
+
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+        GL_TEXTURE_2D, textures.accum, 0);
+        const GLenum accumDrawBuffers[] = {GL_COLOR_ATTACHMENT0};
+        glDrawBuffers(1, accumDrawBuffers);
+
+        glUseProgram(accumShad.prog);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D_ARRAY, textures.atten);
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D_ARRAY, textures.emit);
+        glUniform1i(accumShad.unifLocs.atten, 0);
+        glUniform1i(accumShad.unifLocs.emitColor, 1);
+
+        glDrawArrays(GL_TRIANGLES, 0, 6);
     }
-
-    // --- accum bounces pass ---
-    glDisable(GL_DEPTH_TEST);
-
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-    GL_TEXTURE_2D, textures.accum, 0);
-    const GLenum accumDrawBuffers[] = {GL_COLOR_ATTACHMENT0};
-    glDrawBuffers(1, accumDrawBuffers);
-
-    glUseProgram(accumShad.prog);
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D_ARRAY, textures.atten);
-    glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_2D_ARRAY, textures.emit);
-    glUniform1i(accumShad.unifLocs.atten, 0);
-    glUniform1i(accumShad.unifLocs.emitColor, 1);
-
-    glDrawArrays(GL_TRIANGLES, 0, 6);
 }
 
 int main()
