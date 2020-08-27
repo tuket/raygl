@@ -22,6 +22,8 @@ const float far = 1000000;
 float rayVsSphere(vec3 ori, vec3 dir, vec3 p, float r)
 {
     vec3 op = p - ori;
+    //if(op == vec3(0,0,0))
+    //    return r;
     const float D = dot(dir, op);
     const float H2 = dot(op, op) - D*D;
     float K2 = r*r - H2;

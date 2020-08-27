@@ -13,7 +13,8 @@ using glm::vec4;
 char g_scratch[10*1024];
 GLFWwindow* window;
 
-const u32 k_numSamples = 1;
+const u32 k_numSamples = 256;
+constexpr int numBounces = 4;
 
 static const char* getGlErrorStr(GLenum e)
 {
@@ -63,19 +64,19 @@ SphereObj sceneSpheres[] = {
     SphereObj {
         {0, 0, 0},
         2,
-        {0.5f, 0.5f, 0},
+        {0.0f, 0.0f, 0},
         {0, 0.5f, 0}
     },
     SphereObj {
         {-4, 0, 0},
         2,
-        {1, 1, 1},
+        {0, 0, 0},
         {1.f, 1.f, 1.f}
     },
     SphereObj {
         {+4, 0, 0},
         2,
-        {1, 1, 1},
+        {0, 0, 0},
         {1.f, 1.f, 1.f}
     },
     SphereObj {
@@ -83,6 +84,12 @@ SphereObj sceneSpheres[] = {
         1000,
         {0, 0, 0},
         {1.f, 1.f, 1.f}
+    },
+    SphereObj {
+        {0, 0, 0},
+        1000,
+        {1.f, 1.0f, 1.4f},
+        {0.0f, 0.0f, 0.0f}
     },
 };
 
@@ -126,7 +133,6 @@ u32 quadVbo, quadVao;
 
 u32 fbo;
 
-constexpr int numBounces = 4;
 struct Textures {
     u32 ori[2];
     u32 dir[2];
@@ -368,8 +374,9 @@ static void draw(int w, int h)
 
     for(int sampleInd = 0; sampleInd < k_numSamples; sampleInd++)
     {
-        // --- initialization pass - draw camera rays ---
+        glDisable(GL_BLEND);
         glDisable(GL_DEPTH_TEST);
+        // --- initialization pass - draw camera rays ---
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
             GL_TEXTURE_2D, textures.ori[0], 0);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1,
@@ -385,7 +392,7 @@ static void draw(int w, int h)
                       0, 0, 1, 0,
                       0, 0, 10, 0);
         glUniformMatrix4fv(camRaysShad.unifLocs.viewMtx, 1, GL_FALSE, &viewMtx[0][0]);
-        glUniform1ui(camRaysShad.unifLocs.sampleInd, 0);
+        glUniform1ui(camRaysShad.unifLocs.sampleInd, sampleInd);
         glUniform1ui(camRaysShad.unifLocs.numSamples, k_numSamples);
         glUniform2ui(camRaysShad.unifLocs.resolution, w, h);
         glBindVertexArray(quadVao);
@@ -417,7 +424,7 @@ static void draw(int w, int h)
             glBindTexture(GL_TEXTURE_2D, textures.ori[rayTexSrc]);
             glActiveTexture(GL_TEXTURE1);
             glBindTexture(GL_TEXTURE_2D, textures.dir[rayTexSrc]);
-            glUniform1ui(sphereShad.unifLocs.sampleInd, 0);
+            glUniform1ui(sphereShad.unifLocs.sampleInd, sampleInd);
             glUniform1ui(sphereShad.unifLocs.numSamples, k_numSamples);
             glUniform1i(sphereShad.unifLocs.rayOri, 0);
             glUniform1i(sphereShad.unifLocs.rayDir, 1);
@@ -435,6 +442,9 @@ static void draw(int w, int h)
         }
 
         // --- accum bounces pass ---
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_CONSTANT_ALPHA, GL_ONE);
+        glBlendColor(0, 0, 0, 1.f / k_numSamples);
         glDisable(GL_DEPTH_TEST);
 
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
@@ -514,6 +524,8 @@ int main()
         }
 
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glDisable(GL_BLEND);
+        glDisable(GL_DEPTH_TEST);
         glClearColor(1,1,1,1);
         glClear(GL_COLOR_BUFFER_BIT);
 
