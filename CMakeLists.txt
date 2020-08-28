@@ -21,6 +21,7 @@ add_subdirectory(libs/tg)
 
 set(SOURCES
     main.cpp
+    utils.hpp utils.cpp
 )
 PREPEND(SOURCES "src/" ${SOURCES})
 

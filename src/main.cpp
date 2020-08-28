@@ -6,6 +6,7 @@
 #include <tl/basic.hpp>
 #include <tg/shader_utils.hpp>
 #include <glm/glm.hpp>
+#include "utils.hpp"
 
 using glm::vec3;
 using glm::vec4;
@@ -13,7 +14,7 @@ using glm::vec4;
 char g_scratch[10*1024];
 GLFWwindow* window;
 
-const u32 k_numSamples = 256;
+const u32 k_numSamples = 10;
 constexpr int numBounces = 4;
 
 static const char* getGlErrorStr(GLenum e)
@@ -36,23 +37,6 @@ static const float k_quadVerts[] = {
     -1, -1,  +1, +1,  -1, +1
 };
 
-char* loadStr(const char* fileName)
-{
-    FILE* f = fopen(fileName, "r");
-    if(!f) {
-        tl::eprintln("error loading: ", fileName);
-        return nullptr;
-    }
-    fseek(f, 0, SEEK_END);
-    const size_t len = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    char* str = new char[len+1];
-    fread(str, len, 1, f);
-    str[len] = 0;
-    fclose(f);
-    return str;
-}
-
 struct SphereObj {
     vec3 pos;
     float rad;
@@ -65,7 +49,7 @@ SphereObj sceneSpheres[] = {
         {0, 0, 0},
         2,
         {0.0f, 0.0f, 0},
-        {0, 0.5f, 0}
+        {0, 0.9f, 0}
     },
     SphereObj {
         {-4, 0, 0},
@@ -88,7 +72,7 @@ SphereObj sceneSpheres[] = {
     SphereObj {
         {0, 0, 0},
         1000,
-        {1.f, 1.0f, 1.4f},
+        2.f*vec3{1.0f, 1.0f, 1.1f},
         {0.0f, 0.0f, 0.0f}
     },
 };
