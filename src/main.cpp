@@ -14,8 +14,8 @@ using glm::vec4;
 char g_scratch[10*1024];
 GLFWwindow* window;
 
-const u32 k_numSamples = 10;
-constexpr int numBounces = 4;
+const int k_numSamples = 10;
+constexpr int k_numBounces = 4;
 
 static const char* getGlErrorStr(GLenum e)
 {
@@ -41,144 +41,90 @@ struct SphereObj {
     vec3 pos;
     float rad;
     vec3 emitColor;
+    float padding_0;
     vec3 albedo;
+    float padding_1;
+    SphereObj() {}
+    SphereObj(vec3 pos, float rad, vec3 emitColor, vec3 albedo)
+        : pos(pos), rad(rad), emitColor(emitColor), albedo(albedo) {}
 };
 
 SphereObj sceneSpheres[] = {
-    SphereObj {
+    SphereObj(
         {0, 0, 0},
         2,
-        {0.0f, 0.0f, 0},
+        {0.9f, 0.0f, 0},
         {0, 0.9f, 0}
-    },
-    SphereObj {
+    ),
+    SphereObj(
         {-4, 0, 0},
         2,
         {0, 0, 0},
         {1.f, 1.f, 1.f}
-    },
-    SphereObj {
+    ),
+    /*SphereObj(
         {+4, 0, 0},
         2,
         {0, 0, 0},
         {1.f, 1.f, 1.f}
-    },
-    SphereObj {
+    ),
+    SphereObj(
         {0, -1002, 0},
         1000,
-        {0, 0, 0},
+        {1, 0, 0},
         {1.f, 1.f, 1.f}
-    },
-    SphereObj {
+    ),
+    SphereObj(
         {0, 0, 0},
         1000,
         2.f*vec3{1.0f, 1.0f, 1.1f},
-        {0.0f, 0.0f, 0.0f}
-    },
+        {1.0f, 0.0f, 0.0f}
+    ),*/
 };
-
-struct CommonUnifLocs {
-    i32 sampleInd;
-    i32 numSamples;
-};
-
-struct {
-    u32 prog;
-    struct : CommonUnifLocs{
-        i32 fovFactor;
-        i32 viewMtx;
-        i32 resolution;
-    } unifLocs;
-} camRaysShad;
-
-struct {
-    u32 prog;
-    struct : CommonUnifLocs{
-        i32 rayOri;
-        i32 rayDir;
-        i32 spherePos;
-        i32 sphereRad;
-        i32 emitColor;
-        i32 albedo;
-    } unifLocs;
-} sphereShad;
 
 struct {
     u32 prog;
     struct {
-        i32 atten;
-        i32 emitColor;
+        i32 fovFactor;
+        i32 viewMtx;
+        i32 resolution;
+        i32 sampleInd;
+        i32 numSamples;
     } unifLocs;
-} accumShad;
+} rayShad;
 
 u32 splatTexProg;
-
 u32 quadVbo, quadVao;
-
 u32 fbo;
+u32 spheresSsbo;
 
 struct Textures {
-    u32 ori[2];
-    u32 dir[2];
-    u32 atten;
-    u32 emit;
     u32 accum;
-    u32 depth;
+    u32 tonemapped;
     void init();
     void resize(int w, int h);
 } textures;
 
 void Textures::init()
 {
-    const int numColorTextures = sizeof(Textures) / 4 - 1;
-    u32* allTextures = (u32*)this;
-
-    glGenTextures(numColorTextures, allTextures);
-    for(int i = 0; i < 4; i++) {
-        glBindTexture(GL_TEXTURE_2D, allTextures[i]);
+    u32* tex = &accum;
+    glGenTextures(2, tex);
+    for(int i = 0; i < 2; i++) {
+        glBindTexture(GL_TEXTURE_2D, tex[i]);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     }
-
-    for(int i = 0; i < 2; i++) {
-        glBindTexture(GL_TEXTURE_2D_ARRAY, (&atten)[i]);
-        glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    }
-
-    glBindTexture(GL_TEXTURE_2D, accum);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-
-    glGenRenderbuffers(1, &depth);
 }
 
 void Textures::resize(int w, int h)
 {
-    u32* allTextures = (u32*)this;
-
-    for(int i = 0; i < 4; i++) {
-        glBindTexture(GL_TEXTURE_2D, allTextures[i]);
+    u32* tex = &accum;
+    for(int i = 0; i < 2; i++) {
+        glBindTexture(GL_TEXTURE_2D, tex[i]);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB32F, w, h, 0, GL_RGB, GL_FLOAT, nullptr);
     }
-
-    for(int i = 0; i < 2; i++) {
-        glBindTexture(GL_TEXTURE_2D_ARRAY, (&atten)[i]);
-        glTexStorage3D(GL_TEXTURE_2D_ARRAY, 1, GL_RGB32F, w, h, numBounces);
-    }
-
-    glBindTexture(GL_TEXTURE_2D, accum);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB32F, w, h, 0, GL_RGB, GL_FLOAT, nullptr);
-
-    glBindRenderbuffer(GL_RENDERBUFFER, depth);
-    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT, w, h);
 }
 
 template <i32 N>
@@ -248,81 +194,62 @@ u32 makeShaderProg(u32 vertShad, const char* fragFileName)
     return prog;
 }
 
-static void getCommonUnifLocs(u32 prog, CommonUnifLocs& locs)
-{
-    locs.sampleInd = glGetUniformLocation(prog, "u_sampleInd");
-    locs.numSamples = glGetUniformLocation(prog, "u_numSamples");
-}
-
 static void compileShaders()
 {
     s_glslUtilSrc = loadStr("src/shaders/util.glsl");
     defer(delete[] s_glslUtilSrc);
-
-    // --- cam_rays ---
-    camRaysShad.prog = makeShaderProg(
-        "src/shaders/cam_rays_vert.glsl",
-        "src/shaders/cam_rays_frag.glsl");
-    getCommonUnifLocs(camRaysShad.prog, camRaysShad.unifLocs);
-    camRaysShad.unifLocs.fovFactor =
-        glGetUniformLocation(camRaysShad.prog, "u_fovFactor");
-    camRaysShad.unifLocs.viewMtx =
-        glGetUniformLocation(camRaysShad.prog, "u_viewMtx");
-    camRaysShad.unifLocs.resolution =
-        glGetUniformLocation(camRaysShad.prog, "u_resolution");
 
     const u32 vertShad = makeShader(GL_VERTEX_SHADER, "src/shaders/screen_tc.glsl");
 
     // --- splat texture ---
     splatTexProg = makeShaderProg(vertShad, "src/shaders/splat_tex.glsl");
 
-    // --- sphere ---
-    sphereShad.prog = makeShaderProg(vertShad, "src/shaders/sphere.glsl");
-    getCommonUnifLocs(sphereShad.prog, sphereShad.unifLocs);
-    sphereShad.unifLocs.rayOri =
-        glGetUniformLocation(sphereShad.prog, "u_rayOri");
-    sphereShad.unifLocs.rayDir =
-        glGetUniformLocation(sphereShad.prog, "u_rayDir");
-    sphereShad.unifLocs.spherePos =
-        glGetUniformLocation(sphereShad.prog, "u_spherePos");
-    sphereShad.unifLocs.sphereRad =
-        glGetUniformLocation(sphereShad.prog, "u_sphereRad");
-    sphereShad.unifLocs.emitColor =
-        glGetUniformLocation(sphereShad.prog, "u_emitColor");
-    sphereShad.unifLocs.albedo =
-        glGetUniformLocation(sphereShad.prog, "u_albedo");
-
-    // --- accumulate ---
+    // --- main ---
     {
-        const char* fileName = "src/shaders/accum.glsl";
-        const char* src = loadStr(fileName);
-        defer(delete[] src);
+        const char* vertFileName = "src/shaders/main_vert.glsl";
+        const u32 vertShad = makeShader(GL_VERTEX_SHADER, vertFileName);
+
+        const char* fragFileName = "src/shaders/main_frag.glsl";
         const u32 fragShad = glCreateShader(GL_FRAGMENT_SHADER);
-        defer(glDeleteShader(fragShad));
-        tl::toStringBuffer(g_scratch, "const int k_numBounces = ", numBounces, ";\n");
+        const char* src = loadStr(fragFileName);
+        defer(delete[] src);
+        tl::toStringBuffer(g_scratch,
+            "const int k_numBounces = ", k_numBounces, ";\n");
         const char* srcs[] = {s_glslVersion, s_glslUtilSrc, g_scratch, src};
         uploadSrcs(fragShad, srcs);
         glCompileShader(fragShad);
         if(const char* errMsg = tg::checkCompileErrors(fragShad, g_scratch)) {
-            tl::eprintln("Error compiling: ", fileName);
+            tl::eprintln("Error compiling: ", fragFileName);
             tl::eprintln(errMsg);
             assert(false);
         }
 
-        accumShad.prog = glCreateProgram();
-        glAttachShader(accumShad.prog, vertShad);
-        glAttachShader(accumShad.prog, fragShad);
-        glLinkProgram(accumShad.prog);
-        if(const char* errMsg = tg::checkLinkErrors(accumShad.prog, g_scratch)) {
-            tl::eprintln("Error linking: ", fileName);
+        rayShad.prog = glCreateProgram();
+        glAttachShader(rayShad.prog, vertShad);
+        glAttachShader(rayShad.prog, fragShad);
+        glLinkProgram(rayShad.prog);
+        if(const char* errMsg = tg::checkLinkErrors(rayShad.prog, g_scratch)) {
+            tl::eprintln("Error linking: ", vertFileName, " + ", fragFileName);
             tl::eprintln(errMsg);
             assert(false);
         }
-        accumShad.unifLocs.atten =
-            glGetUniformLocation(accumShad.prog, "u_atten");
-        accumShad.unifLocs.emitColor =
-            glGetUniformLocation(accumShad.prog, "u_emitColor");
-        }
+
+        rayShad.unifLocs.fovFactor =
+            glGetUniformLocation(rayShad.prog, "u_fovFactor");
+        assert(rayShad.unifLocs.fovFactor != -1);
+        rayShad.unifLocs.viewMtx =
+            glGetUniformLocation(rayShad.prog, "u_viewMtx");
+        assert(rayShad.unifLocs.viewMtx != -1);
+        rayShad.unifLocs.resolution =
+            glGetUniformLocation(rayShad.prog, "u_resolution");
+        assert(rayShad.unifLocs.resolution != -1);
+        rayShad.unifLocs.sampleInd =
+            glGetUniformLocation(rayShad.prog, "u_sampleInd");
+        assert(rayShad.unifLocs.sampleInd != -1);
+        rayShad.unifLocs.numSamples =
+            glGetUniformLocation(rayShad.prog, "u_numSamples");
+        assert(rayShad.unifLocs.numSamples != -1);
+    }
 }
 
 static void glErrorCallback(const char *name, void *funcptr, int len_args, ...) {
@@ -353,97 +280,38 @@ static void draw(int w, int h)
     const float fovY = 1.2;
     const float fovFactorY = tan(0.5f * fovY);
     const float fovFactorX = aspectRatio * fovFactorY;
+    const glm::mat4 viewMtx(
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 10, 0);
 
     glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+        GL_TEXTURE_2D, textures.accum, 0);
+    assert(glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE);
+    const GLenum mainPassDrawBuffers[] = {GL_COLOR_ATTACHMENT0};
+    glDrawBuffers(tl::size(mainPassDrawBuffers), mainPassDrawBuffers);
+    glClearColor(0, 0, 0, 0);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    //glEnable(GL_BLEND);
+    //glBlendFunc(GL_CONSTANT_ALPHA, GL_ONE);
+    //glBlendColor(0, 0, 0, 1.f / k_numSamples);
+
+    glUseProgram(rayShad.prog);
+    glUniform2f(rayShad.unifLocs.fovFactor, fovFactorX, fovFactorY);
+    glUniformMatrix4fv(rayShad.unifLocs.viewMtx, 1, GL_FALSE, &viewMtx[0][0]);
+    glUniform1i(rayShad.unifLocs.numSamples, k_numSamples);
+    glUniform2i(rayShad.unifLocs.resolution, w, h);
+
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, spheresSsbo);
+
+    glBindVertexArray(quadVao);
 
     for(int sampleInd = 0; sampleInd < k_numSamples; sampleInd++)
     {
-        glDisable(GL_BLEND);
-        glDisable(GL_DEPTH_TEST);
-        // --- initialization pass - draw camera rays ---
-        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-            GL_TEXTURE_2D, textures.ori[0], 0);
-        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1,
-            GL_TEXTURE_2D, textures.dir[0], 0);
-        assert(glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE);
-        const GLenum initPassDrawBuffers[] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
-        glDrawBuffers(2, initPassDrawBuffers);
-        glUseProgram(camRaysShad.prog);
-        glUniform2f(camRaysShad.unifLocs.fovFactor, fovFactorX, fovFactorY);
-        glm::mat4 viewMtx =
-            glm::mat4(1, 0, 0, 0,
-                      0, 1, 0, 0,
-                      0, 0, 1, 0,
-                      0, 0, 10, 0);
-        glUniformMatrix4fv(camRaysShad.unifLocs.viewMtx, 1, GL_FALSE, &viewMtx[0][0]);
-        glUniform1ui(camRaysShad.unifLocs.sampleInd, sampleInd);
-        glUniform1ui(camRaysShad.unifLocs.numSamples, k_numSamples);
-        glUniform2ui(camRaysShad.unifLocs.resolution, w, h);
-        glBindVertexArray(quadVao);
-        glDrawArrays(GL_TRIANGLES, 0, 6);
-
-        // --- bounce passes ---
-        glEnable(GL_DEPTH_TEST);
-        const GLenum bouncePassDrawBuffers[] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2, GL_COLOR_ATTACHMENT3};
-        glDrawBuffers(4, bouncePassDrawBuffers);
-        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
-                    GL_RENDERBUFFER, textures.depth);
-        int rayTexTarget = 1;
-        for(int bounce = 0; bounce < numBounces; bounce++)
-        {
-            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-                GL_TEXTURE_2D, textures.ori[rayTexTarget], 0);
-            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1,
-                GL_TEXTURE_2D, textures.dir[rayTexTarget], 0);
-            glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2,
-                textures.atten, 0, bounce);
-            glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT3,
-                textures.emit, 0, bounce);
-            
-            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-            glUseProgram(sphereShad.prog);
-            const int rayTexSrc = rayTexTarget ^ 1;
-            glActiveTexture(GL_TEXTURE0);
-            glBindTexture(GL_TEXTURE_2D, textures.ori[rayTexSrc]);
-            glActiveTexture(GL_TEXTURE1);
-            glBindTexture(GL_TEXTURE_2D, textures.dir[rayTexSrc]);
-            glUniform1ui(sphereShad.unifLocs.sampleInd, sampleInd);
-            glUniform1ui(sphereShad.unifLocs.numSamples, k_numSamples);
-            glUniform1i(sphereShad.unifLocs.rayOri, 0);
-            glUniform1i(sphereShad.unifLocs.rayDir, 1);
-            for(int sphereInd = 0; sphereInd < tl::size(sceneSpheres); sphereInd++) {
-                const SphereObj& obj = sceneSpheres[sphereInd];
-                glUniform3fv(sphereShad.unifLocs.spherePos, 1, &obj.pos[0]);
-                glUniform1f(sphereShad.unifLocs.sphereRad, obj.rad);
-                glUniform3fv(sphereShad.unifLocs.emitColor, 1, &obj.emitColor[0]);
-                glUniform3fv(sphereShad.unifLocs.albedo, 1, &obj.albedo[0]);
-
-                glDrawArrays(GL_TRIANGLES, 0, 6);
-            }
-
-            rayTexTarget ^= 1;
-        }
-
-        // --- accum bounces pass ---
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_CONSTANT_ALPHA, GL_ONE);
-        glBlendColor(0, 0, 0, 1.f / k_numSamples);
-        glDisable(GL_DEPTH_TEST);
-
-        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-        GL_TEXTURE_2D, textures.accum, 0);
-        const GLenum accumDrawBuffers[] = {GL_COLOR_ATTACHMENT0};
-        glDrawBuffers(1, accumDrawBuffers);
-
-        glUseProgram(accumShad.prog);
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D_ARRAY, textures.atten);
-        glActiveTexture(GL_TEXTURE1);
-        glBindTexture(GL_TEXTURE_2D_ARRAY, textures.emit);
-        glUniform1i(accumShad.unifLocs.atten, 0);
-        glUniform1i(accumShad.unifLocs.emitColor, 1);
-
+        glUniform1i(rayShad.unifLocs.sampleInd, sampleInd);
         glDrawArrays(GL_TRIANGLES, 0, 6);
     }
 }
@@ -486,6 +354,11 @@ int main()
     glBufferData(GL_ARRAY_BUFFER, sizeof(k_quadVerts), k_quadVerts, GL_STATIC_DRAW);
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
+
+    glGenBuffers(1, &spheresSsbo);
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, spheresSsbo);
+    glBufferData(GL_SHADER_STORAGE_BUFFER,
+        sizeof(sceneSpheres), sceneSpheres, GL_STATIC_DRAW);
 
     glGenFramebuffers(1, &fbo);
     textures.init();
