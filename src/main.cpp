@@ -14,7 +14,7 @@ using glm::vec4;
 char g_scratch[10*1024];
 GLFWwindow* window;
 
-const int k_numSamples = 10;
+const int k_numSamples = 1000;
 constexpr int k_numBounces = 4;
 
 static const char* getGlErrorStr(GLenum e)
@@ -38,48 +38,53 @@ static const float k_quadVerts[] = {
 };
 
 struct SphereObj {
-    vec3 pos;
-    float rad;
-    vec3 emitColor;
-    float padding_0;
-    vec3 albedo;
-    float padding_1;
+    vec4 pos_rad;
+    vec4 emitColor_metallic;
+    vec4 albedo_rough2;
     SphereObj() {}
-    SphereObj(vec3 pos, float rad, vec3 emitColor, vec3 albedo)
-        : pos(pos), rad(rad), emitColor(emitColor), albedo(albedo) {}
+    SphereObj(vec3 pos, float rad, vec3 emitColor, vec3 albedo,
+            float metallic, float rough2)
+        : pos_rad(pos, rad)
+        , emitColor_metallic(emitColor, metallic)
+        , albedo_rough2(albedo, rough2) {}
 };
 
 SphereObj sceneSpheres[] = {
     SphereObj(
         {0, 0, 0},
         2,
-        {0.9f, 0.0f, 0},
-        {0, 0.9f, 0}
+        {0.0f, 0.0f, 0},
+        {0, 0.9f, 0},
+        0, 0
     ),
     SphereObj(
         {-4, 0, 0},
         2,
         {0, 0, 0},
-        {1.f, 1.f, 1.f}
+        {1.f, 1.f, 1.f},
+        0, 0
     ),
-    /*SphereObj(
+    SphereObj(
         {+4, 0, 0},
         2,
         {0, 0, 0},
-        {1.f, 1.f, 1.f}
+        {1.f, 1.f, 1.f},
+        0, 0
     ),
     SphereObj(
         {0, -1002, 0},
         1000,
-        {1, 0, 0},
-        {1.f, 1.f, 1.f}
+        {0, 0, 0},
+        {1.f, 1.f, 1.f},
+        0, 0
     ),
     SphereObj(
         {0, 0, 0},
         1000,
-        2.f*vec3{1.0f, 1.0f, 1.1f},
-        {1.0f, 0.0f, 0.0f}
-    ),*/
+        0.6f*vec3{1.0f, 1.0f, 1.2f},
+        {0.0f, 0.0f, 0.0f},
+        0, 0
+    ),
 };
 
 struct {
@@ -92,6 +97,8 @@ struct {
         i32 numSamples;
     } unifLocs;
 } rayShad;
+
+u32 postproProg;
 
 u32 splatTexProg;
 u32 quadVbo, quadVao;
@@ -204,6 +211,9 @@ static void compileShaders()
     // --- splat texture ---
     splatTexProg = makeShaderProg(vertShad, "src/shaders/splat_tex.glsl");
 
+    // --- postpro ---
+    postproProg = makeShaderProg(vertShad, "src/shaders/postpro.glsl");
+
     // --- main ---
     {
         const char* vertFileName = "src/shaders/main_vert.glsl";
@@ -268,13 +278,17 @@ static void keyCallback(GLFWwindow* window, int key, int scancode, int action, i
 }
 
 static bool needToRedraw = true;
+int sampleInd = 0;
 static void windowResizeCallback(GLFWwindow* window, int w, int h)
 {
-    needToRedraw = true;
+    sampleInd = 0;
 }
 
 static void draw(int w, int h)
 {
+    if(sampleInd == k_numSamples)
+        return;
+    //printf("%d\n", sampleInd);
     textures.resize(w, h);
     float aspectRatio = float(w) / h;
     const float fovY = 1.2;
@@ -292,12 +306,12 @@ static void draw(int w, int h)
     assert(glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE);
     const GLenum mainPassDrawBuffers[] = {GL_COLOR_ATTACHMENT0};
     glDrawBuffers(tl::size(mainPassDrawBuffers), mainPassDrawBuffers);
-    glClearColor(0, 0, 0, 0);
-    glClear(GL_COLOR_BUFFER_BIT);
+    //glClearColor(0, 0, 0, 0);
+    //glClear(GL_COLOR_BUFFER_BIT);
 
-    //glEnable(GL_BLEND);
-    //glBlendFunc(GL_CONSTANT_ALPHA, GL_ONE);
-    //glBlendColor(0, 0, 0, 1.f / k_numSamples);
+    glEnable(GL_BLEND);
+    //glBlendFunc(GL_ONE, GL_ONE); // add
+    glBlendFunc(GL_ONE_MINUS_CONSTANT_ALPHA, GL_CONSTANT_ALPHA);
 
     glUseProgram(rayShad.prog);
     glUniform2f(rayShad.unifLocs.fovFactor, fovFactorX, fovFactorY);
@@ -309,10 +323,12 @@ static void draw(int w, int h)
 
     glBindVertexArray(quadVao);
 
-    for(int sampleInd = 0; sampleInd < k_numSamples; sampleInd++)
+    //for(int sampleInd = 0; sampleInd < k_numSamples; sampleInd++)
     {
+        glBlendColor(0, 0, 0, float(sampleInd) / (sampleInd + 1));
         glUniform1i(rayShad.unifLocs.sampleInd, sampleInd);
         glDrawArrays(GL_TRIANGLES, 0, 6);
+        sampleInd++;
     }
 }
 
@@ -375,10 +391,10 @@ int main()
         // draw scene
         glViewport(0, 0, w, h);
         glScissor(0, 0, w, h);
-        if(needToRedraw) {
+        //if(needToRedraw) {
             draw(w, h);
-            needToRedraw = false;
-        }
+          //  needToRedraw = false;
+        //}
 
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
         glDisable(GL_BLEND);
@@ -386,7 +402,7 @@ int main()
         glClearColor(1,1,1,1);
         glClear(GL_COLOR_BUFFER_BIT);
 
-        glUseProgram(splatTexProg);
+        glUseProgram(postproProg);
         glUniform1i(0, 0);
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, textures.accum);
