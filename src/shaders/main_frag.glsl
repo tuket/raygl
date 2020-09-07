@@ -35,7 +35,7 @@ float rayVsSphere(vec3 ori, vec3 dir, vec3 p, float r)
         return D + K;
 }
 
-vec3 importanceSampleGgx(vec2 rnd, float rough2, vec3 N)
+vec3 importanceSampleGgx_H(vec2 rnd, float rough2, vec3 N)
 {
     float phi = 2 * PI * rnd.x;
     float rough4 = rough2 * rough2;
@@ -54,11 +54,16 @@ vec3 importanceSampleGgx(vec2 rnd, float rough2, vec3 N)
     return tanX * H.x + N * H.y + tanZ * H.z;
 }
 
+vec3 fresnelSchlick(float cosTheta, vec3 F0)
+{
+    return F0 + (1.0 - F0) * pow(1.0 - cosTheta, 5.0);
+}
+
 void main()
 {
-    // compute amision and albedos of bounces
+    // compute emision and attenuations of bounces
     vec3 emitColors[k_numBounces];
-    vec3 albedos[k_numBounces];
+    vec3 attenuations[k_numBounces];
 
     vec3 rayOri = v_rayOri;
     vec3 rayDir = normalize(v_rayDir);
@@ -81,23 +86,43 @@ void main()
         if(nearest == -1)
             break;
 
-        emitColors[bounce] = s_sphereObjs[nearest].emitColor_metallic.rgb;
-        albedos[bounce] = s_sphereObjs[nearest].albedo_rough2.rgb;
+        vec2 rnd = hammersleyVec2(u_sampleInd * k_numBounces + bounce, u_numSamples * k_numBounces);
+        vec3 F0 = vec3(0.04);
+        F0 = mix(F0, surfaceColor.rgb, metalness);
 
-        rayOri = rayOri + nearestDepth * rayDir;
-        vec3 normal = normalize(rayOri - s_sphereObjs[nearest].pos_rad.xyz);
-        vec2 rnd = hammersleyVec2(u_sampleInd, u_numSamples);
-        rayDir = generateUniformSample(normal, rnd);
+        bool isDiffuse = rand(vec2(bounce, sampleInd));
+
+        emitColors[bounce] = s_sphereObjs[nearest].emitColor_metallic.rgb;
+        if(isDiffuse) {
+            attenuations[bounce] = s_sphereObjs[nearest].albedo_rough2.rgb;
+            if(diffuse)
+                attenuations[bounce] /= PI;
+
+            rayOri = rayOri + nearestDepth * rayDir;
+            vec3 normal = normalize(rayOri - s_sphereObjs[nearest].pos_rad.xyz);
+            if(diffuse) {
+                rayDir = generateUniformSample(normal, rnd);
+            }
+            else {
+                rayDir = reflect(rayDir, normal);
+            }
+        }
+        else {
+            float rough2 = s_sphereObjs[nearest].albedo_rough2.w;
+            vec3 H = importanceSampleGgx_H(rnd, rough2, normal);
+            attenuations[bounce] = ;
+        }
     }
 
     // accumutate bounces color
     vec3 color = vec3(0,0,0);
     for(bounce--; bounce >= 0; bounce--)
     {
-        color *= albedos[bounce] / PI;
+        color *= attenuations[bounce];
         color += emitColors[bounce];
     }
     o_color = color;
+    // o_color = abs(rayDir);
 
     //o_color = vec3(emitColors[0]);
 }
