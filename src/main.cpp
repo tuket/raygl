@@ -15,7 +15,7 @@ char g_scratch[10*1024];
 GLFWwindow* window;
 
 const int k_numSamples = 1000;
-constexpr int k_numBounces = 4;
+constexpr int k_numBounces = 2;
 
 static const char* getGlErrorStr(GLenum e)
 {
@@ -51,11 +51,11 @@ struct SphereObj {
 
 SphereObj sceneSpheres[] = {
     SphereObj(
-        {0, 0, 0},
-        2,
-        {0.0f, 0.0f, 0},
-        {0.6, 0.9f, 0.6},
-        1, 0
+        {0, 0, 0}, // pos
+        2, // rad
+        {0.0f, 0.0f, 0}, // emit
+        {0.6, 0.9f, 0.6}, // albedo
+        1, 0 // metallic, rough2
     ),
     SphereObj(
         {-4, 0, 0},
